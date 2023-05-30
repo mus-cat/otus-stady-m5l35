@@ -1,0 +1,18 @@
+@	IN	SOA	ns01.dns.lab. adm.dns.lab. (
+			2023052623
+			1H
+			10M
+			10D
+			10M )
+
+	IN	NS	ns01.dns.lab.
+	IN	NS	ns02.dns.lab.
+
+{% set loc = ip_nsprim.split('.')[3] %}
+{{loc}}	IN 	PTR	ns01.dns.lab.
+{% set loc = ip_nssec.split('.')[3] %}
+{{loc}}	IN 	PTR	ns02.dns.lab.
+{% set loc = ip_cl1.split('.')[3] %}
+{{loc}}	IN 	PTR	web1.dns.lab.
+{% set loc = ip_cl2.split('.')[3] %}
+{{loc}}	IN 	PTR	web2.dns.lab.

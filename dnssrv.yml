@@ -1,0 +1,173 @@
+- hosts: all
+  order: sorted
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Prepare data
+      set_fact:
+        ip_nsprim: >-
+                       {%- if hostvars['ns01'].ansible_facts.all_ipv4_addresses[0] == '10.0.2.15' -%}
+                       {{hostvars['ns01'].ansible_facts.all_ipv4_addresses[1]}}
+                       {%- else -%}
+                       {{hostvars['ns01'].ansible_facts.all_ipv4_addresses[0]}}
+                       {%- endif -%}
+        ip_nssec: "{{ hostvars['ns02'].ansible_facts.eth1.ipv4.address}}"
+        ip_cl1: >-
+                       {%- if hostvars['client1'].ansible_facts.all_ipv4_addresses[0] == '10.0.2.15' -%}
+                       {{hostvars['client1'].ansible_facts.all_ipv4_addresses[1]}}
+                       {%- else -%}
+                       {{hostvars['client1'].ansible_facts.all_ipv4_addresses[0]}}
+                       {%- endif -%}
+        ip_cl2: >-
+                       {%- if hostvars['client2'].ansible_facts.all_ipv4_addresses[0] == '10.0.2.15' -%}
+                       {{hostvars['client2'].ansible_facts.all_ipv4_addresses[1]}}
+                       {%- else -%}
+                       {{hostvars['client2'].ansible_facts.all_ipv4_addresses[0]}}
+                       {%- endif -%}
+        ip_nssec_2: "{{ hostvars['ns02'].ansible_facts.eth2.ipv4.address}}"
+      run_once: yes
+
+    - name: Prepare basic for DNS-server
+      block:
+        - name: Set ip_listen
+          ansible.builtin.set_fact:
+            listen_ip: "{{ ansible_facts.eth1.ipv4.address }}"
+
+        - name: Run role
+          ansible.builtin.include_role:
+            name: ./roles/dnssrv
+
+        - name: Set listen port
+          ansible.builtin.lineinfile:
+            path: /etc/bind/named.conf.options
+            firstmatch: yes
+            insertafter: '^listen-on'
+            regexp: 'recursion .*'
+            line: "recursion no;"
+          notify: Restart DNS
+
+        - name: Set listen port
+          ansible.builtin.lineinfile:
+            path: /etc/bind/named.conf.options
+            firstmatch: yes
+            insertafter: 'recursion no;'
+            regexp: 'allow-transfer .*'
+            line: 'allow-transfer { key "transfer.secondary.key"; };'
+          notify: Restart DNS
+            
+        - name: Set listen port
+          ansible.builtin.lineinfile:
+            path: /etc/bind/named.conf
+              #            firstmatch: yes
+              #            insertafter: '^listen-on'
+            line: 'include "/etc/bind/named.conf.default-zones";'
+            state: absent
+          notify: Restart DNS
+      when: ansible_hostname in ['ns01', 'ns02']
+
+    - name: Configure NS01
+      block:
+        - name: Fetch tarnsfer key
+          ansible.builtin.fetch:
+            dest: ./
+            src: /etc/bind/transfer.secondary.key
+            flat: yes
+ 
+        - name: Deploy named.conf.local
+          ansible.builtin.template:
+            src: named.conf.local.j2
+            dest: /etc/bind/named.conf.local
+
+        - name: Set flag NO for generate zone
+          ansible.builtin.set_fact:
+            for_client1: no
+
+        - name: Deploy db.dns.lab
+          ansible.builtin.template:
+            src: db.dns.lab.j2
+            dest: /etc/bind/db.dns.lab
+
+        - name: Set flag YES for generate zone
+          ansible.builtin.set_fact:
+            for_client1: yes
+
+        - name: Deploy db.client1.dns.lab
+          ansible.builtin.template:
+            src: db.dns.lab.j2
+            dest: /etc/bind/db.client1.dns.lab
+
+        - name: Deploy db.10.168.192
+          ansible.builtin.template:
+            src: db.10.168.192.j2
+            dest: /etc/bind/db.10.168.192
+
+        - name: Deploy db.newdns.lab
+          ansible.builtin.template:
+            src: db.newdns.lab.j2
+            dest: /etc/bind/db.newdns.lab
+          notify: Restart DNS
+      when: ansible_hostname == 'ns01'
+
+    - name: Configure NS02
+      block:  
+        - name: Put tarnsfer key
+          ansible.builtin.copy:
+            dest: /etc/bind/
+            src: transfer.secondary.key
+
+        - name: Make files db
+          ansible.builtin.file:
+            name: /etc/bind/{{item}}
+            state: touch
+            owner: root
+            group: bind
+            mode: 0660
+          loop:
+            - db.dns.lab
+            - db.newdns.lab
+            - db.10.168.192
+            - db.client1.dns.lab
+
+        - name: Deploy named.conf.local
+          ansible.builtin.template:
+            src: named.conf.local.j2
+            dest: /etc/bind/named.conf.local
+          notify: Restart DNS
+      when: ansible_hostname == 'ns02'
+
+    - name: Configure DNS clients
+      block:
+        - name: Set resolvconf to localhost
+          ansible.builtin.lineinfile:
+            path: /etc/resolvconf/resolv.conf.d/original
+            insertbefore: '.*'
+            firstmatch: yes
+            regexp: "nameserver {{item}}"
+            line: nameserver {{item}}
+          loop:
+            - "{{ip_nsprim}}"
+            - "{{ip_nssec}}"
+
+        - name: Set resolv to localhost
+          ansible.builtin.lineinfile:
+            path: /etc/resolv.conf
+            insertbefore: '.*'
+            firstmatch: yes
+            regexp: "nameserver {{item}}"
+            line: nameserver {{item}}
+          loop:
+            - "{{ip_nsprim}}"
+            - "{{ip_nssec}}"
+
+        - name: Set resolv to inetrfaces
+          ansible.builtin.lineinfile:
+            path: /etc/network/interfaces
+            insertbefore: 'dns-nameserver'
+            firstmatch: yes
+            regexp: "dns-nameserver {{item}}"
+            line: dns-nameserver {{item}}
+          loop:
+            - "{{ip_nsprim}}"
+            - "{{ip_nssec}}"
+      when: ansible_hostname in ['client1', 'client2']  

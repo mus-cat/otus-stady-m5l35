@@ -1,0 +1,78 @@
+include "/etc/bind/transfer.secondary.key";
+
+acl client1 { {{ip_cl1}}; {{ip_nssec_2}}; };
+acl client2 { {{ip_cl2}}; };
+
+{% if ansible_hostname == 'ns01' %}
+server {{ip_nssec}} {
+{% else %}
+server {{ip_nsprim}} {
+{% endif %}
+	keys { "transfer.secondary.key"; };
+};
+
+#allow-transfer { key "transfer.secondary.key"; };
+
+{% for view in ['client1', 'client2', 'any'] %}
+view {{view}} {
+match-clients { {{view}}; };
+zone "dns.lab" {
+{% if ansible_hostname == 'ns01' %}
+	type primary;
+	notify yes;
+{% if view == 'client1' %}
+	file "/etc/bind/db.client1.dns.lab";
+{% else %}
+	file "/etc/bind/db.dns.lab";
+{% endif %}
+{% else %}
+{% if view == 'any' %}
+	in-view client2;
+{% else %}
+	type secondary;
+	primaries { {{ ip_nsprim }}; };
+{% if view == 'client1' %}
+	file "/etc/bind/db.client1.dns.lab";
+	transfer-source {{ip_nssec_2}};
+{% else %}
+	file "/etc/bind/db.dns.lab";
+{% endif %}
+{% endif %}
+{% endif %}
+ };
+
+{% if view != 'client2' %}
+zone "newdns.lab" {
+{% if ansible_hostname == 'ns01' %}
+	type primary;
+	notify yes;
+	file "/etc/bind/db.newdns.lab";
+{% else %}
+{% if view == 'any' %}
+	in-view client1;
+{% else %}
+	type secondary;
+	primaries { {{ ip_nsprim }}; };
+	file "/etc/bind/db.newdns.lab";
+{% endif %}
+{% endif %}
+ };
+{% endif %}
+
+zone "10.168.192.in-addr.arpa" {
+{% if ansible_hostname == 'ns01' %}
+	type primary;
+	notify yes;
+	file "/etc/bind/db.10.168.192";
+{% else %}
+{% if view in ['any', 'client2'] %}
+	in-view client1;
+{% else %}
+	type secondary;
+	primaries { {{ ip_nsprim }}; };
+	file "/etc/bind/db.10.168.192";
+{% endif %}
+{% endif %}
+ };
+};
+{% endfor %}

@@ -1,0 +1,17 @@
+@	IN	SOA	ns01.dns.lab. adm.dns.lab. (
+			2023052623
+			1H
+			10M
+			10D
+			10M )
+
+	IN	NS	ns01.dns.lab.
+	IN	NS	ns02.dns.lab.
+
+ns01	IN	A	{{ip_nsprim}}
+ns02	IN	A	{{ip_nssec}}
+
+web1	IN	A	{{ip_cl1}}
+{% if not for_client1 %}
+web2 	IN	A	{{ip_cl2}}
+{% endif %}

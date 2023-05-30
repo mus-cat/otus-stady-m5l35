@@ -1,0 +1,40 @@
+- name: Install DNS server (BIND)
+  ansible.builtin.apt:
+    name: bind9
+    state: present
+
+- name: Set resolvconf to localhost
+  ansible.builtin.lineinfile:
+    path: /etc/resolvconf/resolv.conf.d/original
+    firstmatch: yes
+    insertbefore: '.*'
+    line: nameserver 127.0.0.1
+
+- name: Set resolv to localhost
+  ansible.builtin.lineinfile:
+    path: /etc/resolv.conf
+      #firstmatch: yes
+      #insertbefore: '.*'
+    insertafter: '#.*'
+    line: nameserver 127.0.0.1
+
+- name: Set resolv to interfaces
+  ansible.builtin.lineinfile:
+    path: /etc/network/interfaces
+    firstmatch: yes
+    insertbefore: 'dns-nameserver'
+    line: dns-nameserver 127.0.0.1
+
+- name: Set listen port
+  ansible.builtin.lineinfile:
+    path: /etc/bind/named.conf.options
+    firstmatch: yes
+    insertafter: 'options {'
+    regexp: 'listen-on port 53.*'
+    line: "listen-on port 53 { 127.0.0.1; {{listen_ip}}; };"
+  notify: Restart DNS
+
+- name: Generate TSIG transfer key
+  ansible.builtin.shell:
+    cmd: tsig-keygen "transfer.secondary.key" > /etc/bind/transfer.secondary.key; chmod 0644 /etc/bind/transfer.secondary.key
+
